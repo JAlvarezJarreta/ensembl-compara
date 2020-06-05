@@ -101,12 +101,13 @@ sub fetch_input {
 
 sub write_output {
     my ($self) = @_;
-
+    # By default, flow depth_threshold on branch 2
+    my $default_branch = $self->param('default_branch') // 2;
     if (defined $self->param('computed_depth_threshold')) {
         $self->dataflow_output_id({
                 'param_name'    => 'depth_threshold',
                 'param_value'   => $self->param('computed_depth_threshold'),
-            }, 2);
+        }, $default_branch);
     }
 }
 

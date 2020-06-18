@@ -37,8 +37,8 @@ my $server = 'https://test.rest.ensembl.org';
 my $division;
 my ( $skip_genetrees, $skip_cafe, $skip_alignments, $skip_epo, $skip_lastz, $skip_families, $skip_homology, $skip_cactus );
 
-GetOptions( 
-    "server=s"        => \$server, 
+GetOptions(
+    "server=s"        => \$server,
     "division=s"      => \$division,
     'skip_genetrees'  => \$skip_genetrees,
     'skip_cafe'       => \$skip_cafe,
@@ -109,7 +109,7 @@ elsif($division eq "plants"){
     $gene_symbol              = "PAD4";
     $homology_type            = 'orthologues';
     $homology_method_link     = 'ENSEMBL_ORTHOLOGUES';
-    
+
     $extra_params             = 'compara=plants';
     $skip_families            = 1;
     $skip_epo                 = 1;
@@ -263,26 +263,35 @@ sub fetch_leaf_hash_from_json {
     return $input_json;
 }
 
-sub verify_xml_leaf {
+#Fetch a species node using the productnion name node from a phyloxml input
+# if the searched species is not present it returns undef
+# so the presence of species can be tested by defined.
+sub fetch_species_node {
     my ($this_node, $species_name) = @_;
     my $nodes = ref($this_node) eq 'ARRAY' ? $this_node : [$this_node];
-
     foreach my $node ( @$nodes ) {
         if ( exists $node->{property} ) {
-            return 1 if ($node->{property}->{content} // '') eq $species_name;
+            return $node if (($node->{property}->{content} // '') eq $species_name);
         }
-
         if ( exists $node->{clade} ) {
-            my $verify_recursive = verify_xml_leaf($node->{clade}, $species_name);
-            return 1 if $verify_recursive;
-        } else {
-            foreach my $value ( values %$node ) {
-                return 1 if ($value->{property}->{content} // '') eq $species_name;
+            my $species_node = fetch_species_node($node->{clade}, $species_name);
+            return $species_node if defined $species_node;
+        }
+        else{# in case we are on an ancestral or species node
+            foreach my $chd_node ( values %$node ){
+                if (exists $chd_node->{property}){
+                    return $chd_node if (($chd_node->{property}->{content} // '') eq $species_name);
+                }
+                if (exists $chd_node->{clade}){
+                    my $species_node = fetch_species_node($chd_node->{clade}, $species_name);
+                    return $species_node if defined $species_node;
+                }
             }
         }
-    }
-    return 0;
+        return undef;
+     }
 }
+
 
 #Compara currently have no POST requests. For future purposes.
 
@@ -334,7 +343,7 @@ try{
         ok((substr($responseIDGet->{'content'}, 0, 11) eq "thisisatest"), "Check Callback validity");
 
         $phyloXml = process_phyloXml_get($server."/genetree/id/$gene_tree_id?content-type=text/x-phyloxml+xml;prune_species=$species_1;prune_species=$species_3".($extra_params ? ";$extra_params" : ''));
-        ok( verify_xml_leaf($phyloXml->{phylogeny}, $species_1) && verify_xml_leaf($phyloXml->{phylogeny}, $species_3) , "check prune species validity");
+        ok(defined fetch_species_node($phyloXml->{phylogeny}, $species_1) && defined fetch_species_node($phyloXml->{phylogeny}, $species_3) , "check prune species validity");
 
         $orthoXml = process_orthoXml_get($server."/genetree/id/$gene_tree_id?content-type=text/x-orthoxml+xml;prune_taxon=$taxon_1;prune_taxon=$taxon_2;prune_taxon=$taxon_3".($extra_params ? ";$extra_params" : ''));
         @pruned_species = keys %{ $orthoXml->{species} };
@@ -368,7 +377,6 @@ try{
         $jsontxt = process_json_get($server."/genetree/member/id/$gene_member_id?content-type=application/json".($extra_params ? ";$extra_params" : ''));
         ok($jsontxt->{tree}, "check gene tree member  validity");
 
-
         print "\nTesting GET genetree by member symbol\/\:species\/\:symbol \n\n";
 
         $ext = "/genetree/member/symbol/$species_1/$gene_symbol";
@@ -388,7 +396,7 @@ try{
         %pruned_species = map {$_ => 1} @pruned_species;
         ok((exists($pruned_species{$species_1})) && (exists($pruned_species{$species_2})) && (exists($pruned_species{$species_3} )), "Check gene tree by symbol validity");
     }
-    
+
     unless ( $skip_genetrees || $skip_cafe ) {
         print "\nTesting GET Cafe tree\/id\/\:id \n\n";
 
@@ -415,10 +423,8 @@ try{
         $responseIDGet = $browser->get($server.$ext, { headers => { 'Content-type' => 'text/x-nh' } } );
         ok($responseIDGet->{success}, "Check New Hampshire NH validity");
 
-
         $jsontxt = process_json_get($server."/cafe/genetree/member/id/$gene_member_id?content-type=application/json".($extra_params ? ";$extra_params" : ''));
         ok(exists $jsontxt->{pvalue_avg}, "Check get cafe tree by transcript member validity");
-
 
         print "\nTesting GET Cafe tree by member symbol\/:species\/\:symbol \n\n";
 
@@ -459,7 +465,6 @@ try{
         $jsontxt = process_json_get($server.'/family/id/TF660629?content-type=application/json;member_source=ensembl;aligned=0'.($extra_params ? ";$extra_params" : ''));
         ok( exists ($jsontxt->{members}[0]->{protein_seq}), "Check get family aligned == 0 validity");
 
-
         print "\nTesting GET family member\/id\/\:id \n\n";
 
         $ext = "/family/member/id/$gene_member_id";
@@ -468,10 +473,8 @@ try{
         $responseIDGet = $browser->get($server.$ext, { headers => { 'Content-type' => 'application/json' } } );
         ok($responseIDGet->{success}, "Check JSON validity");
 
-
         $jsontxt = process_json_get($server."/family/member/id/$gene_member_id?content-type=application/json;aligned=0;sequence=none".($extra_params ? ";$extra_params" : ''));
         ok($jsontxt->{1}->{family_stable_id}, "Check get family by member validity");
-
 
         print "\nTesting GET family member by species symbol\/:species\/\:symbol \n\n";
 
@@ -488,35 +491,36 @@ try{
     # EPO not working until web roll out correct ensembl_ancestral!
     unless ( $skip_alignments || $skip_epo ) {
         print "\nTesting GET EPO alignment region\/\:species\/\:region \n\n";
-    
+
         my $ext = "/alignment/region/$species_1/$alignment_region?species_set_group=$species_set_group";
-        $ext .= "?$extra_params" if $extra_params;
+        $ext .= ";$extra_params" if $extra_params;
 
         $responseIDGet = $browser->get($server.$ext, { headers => { 'Content-type' => 'application/json' } } );
         ok($responseIDGet->{success}, "Check json validity");
-    
+
         $responseIDGet = $browser->get($server.$ext, { headers => { 'Content-type' => 'text/x-phyloxml+xml' } } );
         ok($responseIDGet->{success}, "Check phyloXml validity");
-    
-        print $server.$ext.';content-type=text/x-phyloxml;aligned=0' . "\n";
+
         $phyloXml = process_phyloXml_get($server.$ext.';content-type=text/x-phyloxml;aligned=0'.($extra_params ? ";$extra_params" : ''));
         #print Dumper $phyloXml;
-        ok($phyloXml->{phylogeny}->{clade}->{sequence}->{mol_seq}->{is_aligned} == 0, "Check get alignment region and unaligned sequences");
-    
+        my $species_node = fetch_species_node($phyloXml->{phylogeny}, $species_1);
+        ok($species_node->{sequence}->{mol_seq}->{is_aligned} == 0, "Check get alignment region and unaligned sequences");
+
         $jsontxt = process_json_get($server."/alignment/region/$species_1/$lastz_alignment_region?content-type=application/json;display_species_set=$species_1".($extra_params ? ";$extra_params" : ''));
         ok($jsontxt->[0]->{alignments}[0]->{species} eq $species_1, "Check alignment region display_species_set option validity");
     }
-    
+
     unless ( $skip_alignments || $skip_cactus ) {
         print "\nTesting GET alignment region\/\:species\/\:region on HAL file\n\n";
-    
+
         my $ext = "/alignment/region/$cactus_species/$cactus_region?method=CACTUS_HAL;species_set_group=$cactus_species_set".($extra_params ? ";$extra_params" : '');
+        print $server.$ext."\n";
         $responseIDGet = $browser->get($server.$ext, { headers => { 'Content-type' => 'application/json' } } );
         ok($responseIDGet->{success}, "Check json validity");
-    
+
         $responseIDGet = $browser->get($server.$ext, { headers => { 'Content-type' => 'text/x-phyloxml+xml' } } );
         ok($responseIDGet->{success}, "Check phyloXml validity");
-    
+
         $responseIDGet = $browser->get($server.$ext.';aligned=0', { headers => { 'Content-type' => 'text/x-phyloxml+xml' } } );
         ok($responseIDGet->{success}, "Check phyloXml validity with unaligned sequences");
     }
